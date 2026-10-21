@@ -26,7 +26,15 @@ Abre `CMakeLists.txt` y agrega, cerca del inicio (después de `project(...)`):
 
 ```cmake
 # Ruta al paquete de firmware STM32Cube (ajusta la versión si cambia)
+<<<<<<< HEAD
 set(CMSIS_ROOT "/home/<home_estudiante>/STM32Cube/Repository/STM32Cube_FW_F4_V1.28.3")
+=======
+<<<<<<< HEAD
+set(CMSIS_ROOT "/home/<home_estudiante>/STM32Cube/Repository/STM32Cube_FW_F4_V1.28.3")
+=======
+set(CMSIS_ROOT "/home/namontoy/STM32Cube/Repository/STM32Cube_FW_F4_V1.28.3")
+>>>>>>> week-04
+>>>>>>> week-05
 ```
 
 Y en la definición de tu ejecutable/target, agrega:
