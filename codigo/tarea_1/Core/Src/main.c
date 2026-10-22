@@ -170,11 +170,11 @@ void init_gpio(void){
 
     // Configurando GPIOH - pin 1 LED blinky, breadboard
 
-    GPIOH->MODER    &= ~(GPIO_MODER_MODE1);                    
-    GPIOH->MODER    |= (GPIO_MODER_MODE1_0);               
-    GPIOH->OTYPER   &= ~(GPIO_OTYPER_OT1);                                    
-    GPIOH->OSPEEDR  &= ~(GPIO_OSPEEDR_OSPEED1);                                
-    GPIOH->PUPDR    &= ~(GPIO_PUPDR_PUPD1);                                       
+    GPIOH->MODER    &= ~(GPIO_MODER_MODE1);     //Limpiar MODER              
+    GPIOH->MODER    |= (GPIO_MODER_MODE1_0);    //Configurar PH0 como salida  
+    GPIOH->OTYPER   &= ~(GPIO_OTYPER_OT1);      // Salida push-pull                              
+    GPIOH->OSPEEDR  &= ~(GPIO_OSPEEDR_OSPEED1);   // velocidad baja                             
+    GPIOH->PUPDR    &= ~(GPIO_PUPDR_PUPD1);       // sin resisencia pull-up y sin resistencia pull-down                               
     GPIOH->ODR      &= ~(GPIO_ODR_OD1);  // Inicializar el pin PH1 en 0 logico (led apagado)                                    
 }
 
@@ -199,8 +199,8 @@ void init_timers(void){
     TIM2->CR1 &= ~(TIM_CR1_CKD); // 00 en el registro CKD; se cuenta con la señal de 16 MHz)
     TIM3->CR1 &= ~(TIM_CR1_CKD); 
 
-    TIM2->CR1 |= (TIM_CR1_ARPE); 
-    TIM3->CR1 |= (TIM_CR1_ARPE);  
+    TIM2->CR1 |= (TIM_CR1_ARPE); // Habilitar la precarga del auto-reload para TIM2
+    TIM3->CR1 |= (TIM_CR1_ARPE);  // Habilitar la precarga del auto-reload para TIM3
 
     TIM2->CR1 &= ~(TIM_CR1_DIR); // Configurar TIM2 Conteo ascendente
     TIM3->CR1 &= ~(TIM_CR1_DIR); // Configurar TIM3 Conteo ascendente
@@ -247,10 +247,10 @@ void init_EXTI(void){
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; // Habilitar el reloj para SYSCFG
 
     SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3; // Limpiar
-    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PC; // Se utilizará EXTI0 del puerto C (PC0)
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PC; // Se utilizará EXTI0 del puerto C (PC3)
 
     SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0; // Limpiar
-    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA; // La línea EXTI3 viene del puerto A (PA3)
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA; // La línea EXTI3 viene del puerto A (PA0)
 
     EXTI->RTSR |= EXTI_RTSR_TR3; // interrupción por flanco de subida (cuando ingresa el objeto)
     EXTI->FTSR &= ~EXTI_FTSR_TR3; // interrupción por flanco de bajada desactivado
