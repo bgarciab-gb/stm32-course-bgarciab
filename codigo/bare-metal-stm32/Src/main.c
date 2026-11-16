@@ -38,10 +38,11 @@ int main(void)
 }
 
 /* */
+/*
 void init_app() {
     //clock signal for PA.
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-}
+} */
 
 void init_gpio(){
     // Activando la señal de reloj:
