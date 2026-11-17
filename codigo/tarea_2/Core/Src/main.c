@@ -44,15 +44,56 @@
  *
  *
  * =========================== FSM =========================== *
- *
+ ***************************************************************
  */
 
 #include <stdint.h>
 #include "stm32f411xe.h"
 #include "stm32f4xx.h"
 
+// FALTA LA CAPTURA Y EL BOUNCING!!!!!!!!!!!
+
+//-----------------------------Constantes------------------------------------
+
+//-----------------Máquina de estados finitos----------------------------------
+
+// MODOS:
+typedef enum { //Lista de modos posibles
+	MODE_RED, //El encoder cambia el CCR2 (ancho del pulso para rojo)
+	MODE_GREEN, //El encoder cambia el CCR4 (ancho del pulso para verde)
+    MODE_BLUE, //El encoder cambia el CCR1 (ancho del pulso para azul)
+    MODE_ALL, //El encoder cambia el CCR1,2,4 (de los tres pulsos)
+    MODE_OTHER //El encoder cambia el CCR3 (ancho del pulso para el voltaje DAC)
+} Mode_t; //Nombre del tipo: current_mode solo puede recibir valores de este enum
+
+// ESTADOS: la condición en la que está el sistema en un instante dado
+typedef enum { //Lista de estados posibles, cada nombre vale un entero (0, 1, 2...)
+	STATE_IDLE, //Reposo: espera un evento sin hacer nada más (no bloquea)
+	STATE_UPDATE_PWM, //Atiende el giro del encoder: suma o resta al CCR1 del PWM según el modo
+	STATE_CHANGE_MODE, //Atiende el pulsador: cambia entre los 5 modos
+	STATE_BLINK, //Atiende el tick del TIM11: cambia el estado del LED PH1
+	STATE_ERROR, //Estado inválido (trampa de hardware): se recupera hacia STATE_IDLE
+	NUM_STATES //Centinela: cantidad de estados, sirve para validar el rango
+} State_t; //Nombre del tipo: current_state solo puede recibir valores de este enum
+
+// EVENTOS:provocan transiciones entre estados
+typedef enum { //Lista de eventos posibles, cada nombre vale un entero (0, 1, 2...)
+	EV_NONE, //No ha ocurrido nada
+	EV_ENCODER_CHANGED, //El encoder avanzó o retrocedió al menos un paso
+	EV_BUTTON_PRESS, //El pulsador fue presionado (flanco de bajada)
+	EV_BLINK_TICK, //
+	NUM_EVENTS //Centinela: cantidad de eventos, sirve para validar el rango
+} Event_t; //Nombre del tipo: current_event solo puede recibir valores de este enum
+
+
 //-----------------Definición de variables----------------------------------
 
+// Variable estado actual:
+State_t current_state = STATE_IDLE; // Estado inicial en reposo
+//Bandera para acceder a los estados:
+uint8_t state_entry_flag = 1;
+// Modo actual:
+Mode_t current_mode = MODE_RED; // inicia modificando el duty para led rojo
 
 volatile uint32_t time_ms = 0; // almacena los ms para el debounce
 volatile uint8_t button_flag = 0; //Bandera que deja la ISR del pulsador
@@ -68,7 +109,15 @@ volatile uint16_t capture_1 = 0;
 volatile uint16_t capture_2 = 0;
 volatile int16_t signal_period = 0;
 
-//-----------------Cabecera de funciones----------------------------------
+
+//-----------------Cabecera de funciones--------------------------------------
+
+// drivers FSM:
+Event_t get_next_event(void);
+int32_t encoder_take_steps(void);
+void pwm_apply_steps(int32_t steps);
+void change_mode (void);
+void blinky_on_off(void);
 
 // Inicialización
 void init_gpio(void);
@@ -80,10 +129,10 @@ void init_timer11(void); //Blinky
 void init_EXTI(void);
 
 
-
 //--------------------------main-----------------------------------
 int main(void)
 {
+    Event_t current_event = EV_NONE;
     void init_gpio(void);
     void init_EXTI(void);
     void init_timer3_PWM(void);
@@ -94,12 +143,167 @@ int main(void)
     
 
     while(1) {
+
+        if(current_state >= NUM_STATES){
+            current_state = STATE_ERROR;
+            state_entry_flag = 1;
+        }
         
+        switch (current_state) {
+
+        case STATE_IDLE:
+            // entrar
+            if(state_entry_flag) {
+                state_entry_flag =0;
+            }
+
+            // hacer:
+            current_event= get_next_event();
+
+            // Transiciones:
+            if (current_event == EV_BUTTON_PRESS) {
+                current_state = STATE_CHANGE_MODE;
+                state_entry_flag = 1;
+            }
+
+            else if (current_event == EV_ENCODER_CHANGED) {
+                current_state = STATE_UPDATE_PWM;
+                state_entry_flag = 1;
+            }
+            else if (current_event == EV_BLINK_TICK) {
+                current_state = STATE_BLINK;
+                state_entry_flag = 1;
+            }
+            break;
+            
+            
+        case STATE_UPDATE_PWM:
+            //Entra:
+            if(state_entry_flag){
+                pwm_apply_steps(encoder_take_steps());
+                state_entry_flag = 0;
+            }
+            current_state = STATE_IDLE;
+            state_entry_flag=1;
+            break;
+
+        case STATE_CHANGE_MODE:
+            //Entra:
+            if(state_entry_flag){
+                change_mode();
+                state_entry_flag = 0;
+            }
+            //Vuelve al estado de reposo
+            current_state = STATE_IDLE;
+            state_entry_flag=1;
+            break;
+        case STATE_BLINK:
+            //Entra:
+            if(state_entry_flag){
+                blinky_on_off();
+                state_entry_flag = 0;
+            }
+            current_state = STATE_IDLE;
+            state_entry_flag=1;
+            break;
+        case STATE_ERROR:
+        default:
+            current_state = STATE_IDLE;
+            state_entry_flag=1;
+            break;
+        }
 
     }
     return 0;
 }
 
+//===================== FUNCIONES DE FSM =====================//
+
+Event_t get_next_event(void){
+    if(button_flag==1){
+        button_flag=0;
+        return EV_BUTTON_PRESS;
+    }
+
+    int32_t contador = (int32_t) TIM2->CNT; //valor del contador cuando se gira el encoder 
+    if ((contador >= 4) || (contador <= -4)) { //4 cuentas = 1 paso mecánico (modo encoder 3). Hay al menos un paso completo, horario o antihorario
+        return EV_ENCODER_CHANGED;
+    }
+
+    if (blink_flag == 1) { //
+        blink_flag = 0;
+        return EV_BLINK_TICK;
+    }
+
+    return EV_NONE;    
+}
+
+int32_t encoder_take_steps(void){
+    int32_t steps = (int32_t) TIM2->CNT / 4; //4 cuentas = 1 paso.
+    TIM2->CNT = 0; //Se reinicia CNT
+    return steps;
+}
+
+void pwm_apply_steps(int32_t steps){
+
+    if(current_mode == MODE_RED){
+        ccr_value_red += steps *10;
+    }
+    else if (current_mode== MODE_GREEN) {
+        ccr_value_green += steps *10;
+    }
+    else if (current_mode== MODE_BLUE) {
+        ccr_value_blue += steps *10;
+    }
+    else if (current_mode== MODE_ALL) {
+        ccr_value_red += steps *10;
+        ccr_value_green += steps *10;
+        ccr_value_blue += steps *10;
+    }
+    else if (current_mode== MODE_OTHER) {
+        ccr_value_voltage += steps *10;
+    }
+
+
+    if (ccr_value_red < 0) ccr_value_red = 0;
+    if (ccr_value_red > arr_value + 1) ccr_value_red = arr_value + 1;
+
+    if (ccr_value_green < 0) ccr_value_green = 0;
+    if (ccr_value_green > arr_value + 1) ccr_value_green = arr_value + 1;
+
+    if (ccr_value_blue < 0) ccr_value_blue = 0;
+    if (ccr_value_blue > arr_value + 1) ccr_value_blue = arr_value + 1;
+
+    if (ccr_value_voltage < 0) ccr_value_voltage = 0;
+    if (ccr_value_voltage > arr_value + 1) ccr_value_voltage = arr_value + 1;
+
+
+    TIM3->CCR2 = ccr_value_red; //
+    TIM3->CCR4 = ccr_value_green; //
+    TIM3->CCR1 = ccr_value_blue; //
+    TIM3->CCR3 = ccr_value_voltage; //
+}
+
+void change_mode (void){
+    if (current_mode==MODE_RED) {
+        current_mode=MODE_GREEN;
+    }
+    if (current_mode==MODE_GREEN) {
+        current_mode=MODE_BLUE;
+    }
+    if (current_mode==MODE_BLUE) {
+        current_mode=MODE_ALL;
+    }
+    if (current_mode==MODE_ALL) {
+        current_mode=MODE_OTHER;
+    }
+
+}
+
+// Cambiar el estado del led PH1:
+void blinky_on_off (void){
+	GPIOH->ODR ^= GPIO_ODR_OD1; //XOR con 1: invierte el bit sin tocar los otros pines
+}
 
 //===================== FUNCIONES DE INICIALIZACIÓN =====================//
 
@@ -280,7 +484,6 @@ void init_timer11(void){
 }
 
 
-
 //===================== HANDLERS INTERRUPCIONES =====================//
 
 /* Handler para la interrupción de TIM10 (blinky) */
@@ -310,7 +513,7 @@ void EXTI0_IRQHandler(void){
 void TIM4_IRQHandler(void){
     if (TIM4->SR & TIM_SR_CC4IF) { // Pregunta si se alzó la bandera
         TIM4->SR &= ~TIM_SR_CC4IF; // Limpiar la bandera de interrupción
-        
+    
     }
 }
 
