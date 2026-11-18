@@ -133,13 +133,13 @@ void init_EXTI(void);
 int main(void)
 {
     Event_t current_event = EV_NONE;
-    void init_gpio(void);
-    void init_EXTI(void);
-    void init_timer3_PWM(void);
-    void init_timer2_encoder(void);
-    void init_timer4_capture(void);
-    void init_timer10(void); //Debounce
-    void init_timer11(void); //Blinky
+    init_gpio();
+    init_EXTI();
+    init_timer3_PWM();
+    init_timer2_encoder();
+    init_timer4_capture();
+    init_timer10(); //Debounce
+    init_timer11(); //Blinky
     
 
     while(1) {
@@ -247,21 +247,21 @@ int32_t encoder_take_steps(void){
 void pwm_apply_steps(int32_t steps){
 
     if(current_mode == MODE_RED){
-        ccr_value_red += steps *10;
+        ccr_value_red += steps *100;
     }
     else if (current_mode== MODE_GREEN) {
-        ccr_value_green += steps *10;
+        ccr_value_green += steps *100;
     }
     else if (current_mode== MODE_BLUE) {
-        ccr_value_blue += steps *10;
+        ccr_value_blue += steps *100;
     }
     else if (current_mode== MODE_ALL) {
-        ccr_value_red += steps *10;
-        ccr_value_green += steps *10;
-        ccr_value_blue += steps *10;
+        ccr_value_red += steps *100;
+        ccr_value_green += steps *100;
+        ccr_value_blue += steps *100;
     }
     else if (current_mode== MODE_OTHER) {
-        ccr_value_voltage += steps *10;
+        ccr_value_voltage += steps *100;
     }
 
 
@@ -288,14 +288,17 @@ void change_mode (void){
     if (current_mode==MODE_RED) {
         current_mode=MODE_GREEN;
     }
-    if (current_mode==MODE_GREEN) {
+    else if (current_mode==MODE_GREEN) {
         current_mode=MODE_BLUE;
     }
-    if (current_mode==MODE_BLUE) {
+    else if (current_mode==MODE_BLUE) {
         current_mode=MODE_ALL;
     }
-    if (current_mode==MODE_ALL) {
+    else if (current_mode==MODE_ALL) {
         current_mode=MODE_OTHER;
+    }
+    else if (current_mode==MODE_OTHER) {
+        current_mode=MODE_RED;
     }
 
 }
@@ -359,7 +362,7 @@ void init_gpio(void){
     GPIOB->MODER &= ~GPIO_MODER_MODE9; //Limpiar (00)
     GPIOB->MODER |= GPIO_MODER_MODE9_1; //(10) Función alternativa
     GPIOB->AFR[1] &= ~GPIO_AFRH_AFRH1; //Limpiar
-    GPIOB->AFR[0] |= GPIO_AFRH_AFRH1_1; //(0010 AF02)
+    GPIOB->AFR[1] |= GPIO_AFRH_AFRH1_1; //(0010 AF02)
                                         
 }
 
@@ -444,10 +447,9 @@ void init_timer4_capture(void){
 
     TIM4->DIER |= (TIM_DIER_CC4IE);
 
-    TIM2->SMCR |= (TIM_SMCR_SMS_0 | TIM_SMCR_SMS_1); //011: modo encoder 3, cuenta los flancos de TI1 y TI2 -Slave mode
-    TIM2->CR1 |= TIM_CR1_CEN; //Arranca el contador
 
     __NVIC_EnableIRQ(TIM4_IRQn);
+    TIM4->CR1 |= TIM_CR1_CEN; //Arranca el contador
 
 }
 
@@ -496,23 +498,33 @@ void TIM1_UP_TIM10_IRQHandler(void){
 
 /* Handler para la interrupción de TIM11 (blinky) */
 void TIM1_TRG_COM_TIM11_IRQHandler(void){
-    if (TIM11->SR & TIM_SR_UIF)
+    if (TIM11->SR & TIM_SR_UIF){
         TIM11->SR &= ~TIM_SR_UIF; // Baja la bandera (escribiendo 0) para que la interrupción se pueda repetir
 	    blink_flag = 1; // La FSM lo convierte en EV_BLINK_TICK
+
+    }
+       
 }
 
 /* Handler para la EXTI (botón) */
 void EXTI0_IRQHandler(void){
-    if (EXTI->PR & EXTI_PR_PR0)
+    if (EXTI->PR & EXTI_PR_PR0){
         EXTI->PR |= EXTI_PR_PR0; // Limpiar la bandera pendiente (escribiendo 1)
         button_flag = 1; // La FSM lo convierte en EV_BUTTON_PRESS
     
+
+    }
+
+ 
 }
 
 /* Handler para la interrupción de captura */
 void TIM4_IRQHandler(void){
-    if (TIM4->SR & TIM_SR_CC4IF) { // Pregunta si se alzó la bandera
-        TIM4->SR &= ~TIM_SR_CC4IF; // Limpiar la bandera de interrupción
+    if (TIM4->SR & TIM_SR_CC4IF){
+         TIM4->SR &= ~TIM_SR_CC4IF; // Limpiar la bandera de interrupción
+
+    } { // Pregunta si se alzó la bandera
+       
     
     }
 }
@@ -521,4 +533,3 @@ void TIM4_IRQHandler(void){
          capture_2= TIM4->CNT;
          signal_period = capture_2 - capture_1; //periodo en us.
         */
-
