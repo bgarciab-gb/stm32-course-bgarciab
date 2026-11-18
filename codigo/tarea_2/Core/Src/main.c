@@ -48,12 +48,9 @@
  */
 
 #include <stdint.h>
+#include <sys/types.h>
 #include "stm32f411xe.h"
 #include "stm32f4xx.h"
-
-// FALTA LA CAPTURA Y EL BOUNCING!!!!!!!!!!!
-
-//-----------------------------Constantes------------------------------------
 
 //-----------------Máquina de estados finitos----------------------------------
 
@@ -72,6 +69,7 @@ typedef enum { //Lista de estados posibles, cada nombre vale un entero (0, 1, 2.
 	STATE_UPDATE_PWM, //Atiende el giro del encoder: suma o resta al CCR1 del PWM según el modo
 	STATE_CHANGE_MODE, //Atiende el pulsador: cambia entre los 5 modos
 	STATE_BLINK, //Atiende el tick del TIM11: cambia el estado del LED PH1
+    STATE_MEASURE_FREQUENCY, //Atiende la detección de los flancos para medir periodo-->frecuencia
 	STATE_ERROR, //Estado inválido (trampa de hardware): se recupera hacia STATE_IDLE
 	NUM_STATES //Centinela: cantidad de estados, sirve para validar el rango
 } State_t; //Nombre del tipo: current_state solo puede recibir valores de este enum
@@ -82,6 +80,7 @@ typedef enum { //Lista de eventos posibles, cada nombre vale un entero (0, 1, 2.
 	EV_ENCODER_CHANGED, //El encoder avanzó o retrocedió al menos un paso
 	EV_BUTTON_PRESS, //El pulsador fue presionado (flanco de bajada)
 	EV_BLINK_TICK, //
+    EV_CAPTURE_READY, //
 	NUM_EVENTS //Centinela: cantidad de eventos, sirve para validar el rango
 } Event_t; //Nombre del tipo: current_event solo puede recibir valores de este enum
 
@@ -96,6 +95,9 @@ uint8_t state_entry_flag = 1;
 Mode_t current_mode = MODE_RED; // inicia modificando el duty para led rojo
 
 volatile uint32_t time_ms = 0; // almacena los ms para el debounce
+volatile uint32_t last_button_ms = 0; // almacena el instante de la última pulsación aceptada
+volatile uint8_t debounce_active = 0; // se usa para indicar si estamos en el intervalo de debouncing (30 ms)
+
 volatile uint8_t button_flag = 0; //Bandera que deja la ISR del pulsador
 volatile uint8_t blink_flag = 0; //Bandera que deja la ISR del TIM11
 
@@ -105,9 +107,15 @@ int32_t ccr_value_green = 0; //CCR --> ancho del pulso led verde
 int32_t ccr_value_blue = 0; //CCR --> ancho del pulso led azul
 int32_t ccr_value_voltage = 0; //CCR --> ancho del pulso para generar señal de voltaje
 
+// Captura de señal:
 volatile uint16_t capture_1 = 0;
 volatile uint16_t capture_2 = 0;
-volatile int16_t signal_period = 0;
+volatile uint16_t signal_period = 0;
+
+volatile uint8_t first_capture = 0;
+volatile uint8_t capture_flag = 0;
+
+volatile uint32_t frequency = 0;
 
 
 //-----------------Cabecera de funciones--------------------------------------
@@ -174,6 +182,12 @@ int main(void)
                 current_state = STATE_BLINK;
                 state_entry_flag = 1;
             }
+            else if (current_event == EV_CAPTURE_READY){
+                current_state = STATE_MEASURE_FREQUENCY;
+                state_entry_flag = 1;
+            }
+
+
             break;
             
             
@@ -206,6 +220,21 @@ int main(void)
             current_state = STATE_IDLE;
             state_entry_flag=1;
             break;
+
+        case STATE_MEASURE_FREQUENCY:
+
+            if (state_entry_flag){
+                if (signal_period != 0){
+                frequency = 1000000UL / signal_period;
+                }
+
+                state_entry_flag = 0;
+                }
+
+            current_state = STATE_IDLE;
+            state_entry_flag = 1;
+            break;
+
         case STATE_ERROR:
         default:
             current_state = STATE_IDLE;
@@ -233,6 +262,11 @@ Event_t get_next_event(void){
     if (blink_flag == 1) { //
         blink_flag = 0;
         return EV_BLINK_TICK;
+    }
+
+    if (capture_flag == 1){
+    capture_flag = 0;
+    return EV_CAPTURE_READY;
     }
 
     return EV_NONE;    
@@ -438,6 +472,8 @@ void init_timer4_capture(void){
     TIM4->ARR = 0xFFFF; //maximo
     TIM4->PSC = 16-1; //cuenta en us
     TIM4->CR1 |= TIM_CR1_ARPE; //Preload del ARR
+    TIM4->EGR |= TIM_EGR_UG; // Forzar que se cargue el PSC antes de empezar a contar
+    TIM4->SR &= ~TIM_SR_UIF; //Iniciar bandera abajo
 
     // Canal 4:
     TIM4->CCMR2 |= (TIM_CCMR2_CC4S_0); //01: CH4 configurado como input. CC4 mapeado a TI4.
@@ -488,11 +524,17 @@ void init_timer11(void){
 
 //===================== HANDLERS INTERRUPCIONES =====================//
 
-/* Handler para la interrupción de TIM10 (blinky) */
+/* Handler para la interrupción de TIM10 (debounce) */
 void TIM1_UP_TIM10_IRQHandler(void){
     if (TIM10->SR & TIM_SR_UIF) { // Pregunta si se alzó la bandera
         TIM10->SR &= ~TIM_SR_UIF; // Limpiar la bandera de interrupción
         time_ms++;
+
+        if (debounce_active == 1) {
+            if ((u_int32_t)(time_ms-last_button_ms)>=40) {
+                debounce_active=0;
+            }
+        }
     }
 }
 
@@ -510,8 +552,12 @@ void TIM1_TRG_COM_TIM11_IRQHandler(void){
 void EXTI0_IRQHandler(void){
     if (EXTI->PR & EXTI_PR_PR0){
         EXTI->PR |= EXTI_PR_PR0; // Limpiar la bandera pendiente (escribiendo 1)
-        button_flag = 1; // La FSM lo convierte en EV_BUTTON_PRESS
-    
+        if (debounce_active==0){
+
+            button_flag = 1; // La FSM lo convierte en EV_BUTTON_PRESS
+            last_button_ms= time_ms;
+            debounce_active=1;
+        }
 
     }
 
@@ -520,16 +566,22 @@ void EXTI0_IRQHandler(void){
 
 /* Handler para la interrupción de captura */
 void TIM4_IRQHandler(void){
-    if (TIM4->SR & TIM_SR_CC4IF){
-         TIM4->SR &= ~TIM_SR_CC4IF; // Limpiar la bandera de interrupción
-
-    } { // Pregunta si se alzó la bandera
-       
     
+    if (TIM4->SR & TIM_SR_CC4IF){
+
+        uint16_t capture = TIM4->CCR4;
+
+        if (first_capture == 0){
+            capture_1 = capture;
+            first_capture = 1;
+        }
+        else {
+            capture_2 = capture;
+            signal_period = (uint16_t)(capture_2 - capture_1);
+
+            capture_1 = capture_2;
+            capture_flag = 1;
+        }
     }
 }
-
-       /*capture_1= TIM4->CNT;
-         capture_2= TIM4->CNT;
-         signal_period = capture_2 - capture_1; //periodo en us.
-        */
+       
