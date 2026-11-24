@@ -23,15 +23,30 @@ set(CMSIS_ROOT "/home/carolina/STM32Cube/Repository/STM32Cube_FW_F4_V1.28.0")
 # Create an executable object type
 add_executable(${PROJECT_NAME})
 
+
 # Include additional CMake files for flags, components, and files
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/flags.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/files.cmake)
 
 # Add sources to executable/library
+# PASO 9 - HAL BLINKY TUTORIAL:
 target_sources(${PROJECT_NAME} PRIVATE
-  ${CMSIS_ROOT}/Drivers/CMSIS/Device/ST/STM32F4xx/Source/Templates/system_stm32f4xx.c
-  # User defined sources
+  ${CMAKE_SOURCE_DIR}/Core/Src/system_stm32f4xx.c
+
+  ${CMAKE_SOURCE_DIR}/Core/Src/stm32f4xx_it.c
+
+  # HAL drivers — one line per file copied in Step 4
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c
+  ${CMAKE_SOURCE_DIR}/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c
 )
 
 # Add include directories
